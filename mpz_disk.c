@@ -1,6 +1,7 @@
 #include "mpz_disk.h"
+#include <stdlib.h>
 
-int mpz_disk_init(mpz_disk_t mp) {
+int mpz_disk_init(struct mpz_disk_t mp) {
 	// Generate a random filename (from https://codereview.stackexchange.com/questions/29198/random-string-generator-in-c)
     const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -18,4 +19,6 @@ int mpz_disk_init(mpz_disk_t mp) {
 		return -1;
 
 	fwrite(&zero, 1, 1, mp.mp_file);
+
+	return 0;
 }

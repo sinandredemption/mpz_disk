@@ -15,9 +15,9 @@ struct mpz_disk_t
 // Initialize a mpz_disk_t 
 int mpz_disk_init(mpz_disk_t);
 
-void mpz_disk_add(mpz_disk_t, mpz_disk_t, mpz_disk_t);
-void mpz_disk_sub(mpz_disk_t, mpz_disk_t, mpz_disk_t);
-void mpz_disk_mul(mpz_disk_t, mpz_disk_t, mpz_disk_t);
+void mpz_disk_add(struct mpz_disk_t, struct mpz_disk_t, struct mpz_disk_t);
+void mpz_disk_sub(struct mpz_disk_t, struct mpz_disk_t, struct mpz_disk_t);
+void mpz_disk_mul(struct mpz_disk_t, struct mpz_disk_t, struct mpz_disk_t);
 
 //void mpz_disk_add_mpz(mpz_disk_t, mpz_t, mpz_disk_t);
 //void mpz_disk_sub_mpz(mpz_disk_t, mpz_t, mpz_disk_t);
