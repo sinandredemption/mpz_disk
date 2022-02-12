@@ -5,8 +5,11 @@
 
 #ifdef _WIN32	/* Windows */
 #include <Windows.h>
+
 #elif defined(__unix__)	/* *nix */
 #include <unistd.h>
+
+#error "Not all POSIX functions have been implemented yet"
 #endif
 
 
@@ -63,12 +66,13 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 	size_t block_size = available_mem / 3;
 	size_t limbs_in_block = block_size / sizeof(mp_limb_t);
 
-	// Number of blocks = 1 + max(bytes in op1, bytes in op2) / block_size
-	size_t n_blocks = 1 +
-		max(_mpz_disk_get_file_size(op1->filename), _mpz_disk_get_file_size(op2->filename))
-		 /
-		block_size;
-	
+	// Number of blocks in op1
+	size_t n_op1_blocks = 1 + _mpz_disk_get_file_size(op1->filename) / block_size;
+	// Number of blocks in op2
+	size_t n_op2_blocks = 1 + _mpz_disk_get_file_size(op2->filename) / block_size;
+	// Minimum number of blocks in output (rop)
+	size_t n_blocks = max(n_op1_blocks, n_op2_blocks);
+
 	// Try to allocate memory for the blocks
 	mp_limb_t* rop_block, * op1_block, * op2_block;
 
@@ -82,8 +86,16 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 		return -2;
 
 	mp_limb_t carry = 0;
-	for (int n = 0; n < n_blocks; n++)
+	for (int n = 1; n <= n_blocks; n++)
 	{
+		// Pad the input block with zero if the current block
+		// number is greater than or equal to the number of
+		// blocks in the input blocks
+		if (n >= n_op1_blocks)
+			memset(op1_block, 0, limbs_in_block * sizeof(mp_limb_t));
+		if (n >= n_op2_blocks)
+			memset(op2_block, 0, limbs_in_block * sizeof(mp_limb_t));
+
 		// Read from the files into the blocks
 		fread(op1_block, sizeof(mp_limb_t), limbs_in_block, op1_file);
 		fread(op2_block, sizeof(mp_limb_t), limbs_in_block, op2_file);
@@ -94,9 +106,24 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 		// Process carry as well
 		carry_now += MPZ_ADD_CARRY_FUNCTION(rop_block, rop_block, limbs_in_block, carry);
 
+		// Write rop_block to rop
+		fwrite(rop_block, sizeof(mp_limb_t), limbs_in_block, rop_file);
+
 		assert(carry_now <= 1);	// Carry can either by 0 or 1
 		
 		carry = carry_now;
+	}
+
+	// Finally, write out the carry
+	if (mpz_cmp_ui(carry, 0) == 0)
+		fwrite(&carry, sizeof(mp_limb_t), 1, rop_file);
+	else {
+		// Truncate unneccassary zereos in the output file
+		size_t top_limb = limbs_in_block - 1;
+		while (rop_block[top_limb] == 0 && top_limb > 0)
+			top_limb--;
+
+		_mpz_disk_truncate_file(rop->filename, (limbs_in_block - top_limb) * sizeof(mp_limb_t));
 	}
 }
 
@@ -125,9 +152,13 @@ size_t _mpz_disk_get_system_free_RAM()
 int64_t _mpz_disk_get_file_size(char* filename)
 {
 #ifdef _WIN32
+	size_t name_size = strlen(filename) + 1;
+	wchar_t* wfilename = malloc(name_size * sizeof(wchar_t));
+	mbstowcs(wfilename, filename, name_size);
+
 	HANDLE f = CreateFile
 	(
-		filename,
+		wfilename,
 		FILE_READ_ATTRIBUTES,
 		0,
 		NULL,
@@ -135,6 +166,8 @@ int64_t _mpz_disk_get_file_size(char* filename)
 		FILE_ATTRIBUTE_NORMAL,
 		NULL
 	);
+
+	free(wfilename);
 
 	if (f != INVALID_HANDLE_VALUE)
 	{
@@ -146,6 +179,51 @@ int64_t _mpz_disk_get_file_size(char* filename)
 	}
 	else
 		return -1;
+#elif defined(__unix__)
+#endif
+}
+
+int _mpz_disk_truncate_file(char* filename, size_t bytes_to_truncate)
+{
+#ifdef _WIN32
+	size_t name_size = strlen(filename) + 1;
+	wchar_t* wfilename = malloc(name_size * sizeof(wchar_t));
+	mbstowcs(wfilename, filename, name_size);
+
+	HANDLE f = CreateFile
+	(
+		wfilename,
+		GENERIC_WRITE,
+		0,
+		NULL,
+		OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL,
+		NULL
+	);
+
+	free(wfilename);
+
+	if (f == INVALID_HANDLE_VALUE)
+		return -1;
+
+	LARGE_INTEGER pos;
+	pos.QuadPart = -(LONGLONG) bytes_to_truncate;
+
+	if (SetFilePointerEx(f, pos, NULL, FILE_END) != 0)
+	{
+		if (SetEndOfFile(f) == 0)
+		{
+			CloseHandle(f);
+			return -1;
+		}
+
+		CloseHandle(f);
+		return 0;
+	}
+	else {
+		CloseHandle(f);
+		return -1;
+	}
 #elif defined(__unix__)
 #endif
 }

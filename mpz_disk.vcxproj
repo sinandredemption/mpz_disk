@@ -147,8 +147,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="main.c" />
     <ClCompile Include="mpz_disk.c" />
+    <ClCompile Include="main.c" />
+    <ClCompile Include="tests.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="mpz_disk.h" />

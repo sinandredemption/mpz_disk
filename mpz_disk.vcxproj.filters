@@ -15,10 +15,13 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="mpz_disk.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="main.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="mpz_disk.c">
+    <ClCompile Include="tests.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

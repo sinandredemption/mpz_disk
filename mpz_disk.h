@@ -6,8 +6,8 @@
 #include <stdint.h>
 
 #define MPZ_DISK_FILENAME_LEN 20
-#define MPZ_ADD_FUNCTION mpz_add_n
-#define MPZ_ADD_CARRY_FUNCTION mpz_add_1
+#define MPZ_ADD_FUNCTION mpn_add_n
+#define MPZ_ADD_CARRY_FUNCTION mpn_add_1
 
 typedef struct
 {
@@ -40,5 +40,7 @@ void mpz_disk_mul(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2);
 size_t _mpz_disk_get_system_free_RAM(); // FIXME Rename
 // Get size of file in bytes
 int64_t _mpz_disk_get_file_size(char* filename);
+// Truncate the last 'bytes_to_truncate' bytes_to_truncate of a file
+int _mpz_disk_truncate_file(char* filename, size_t bytes_to_truncate);
 
 #endif
