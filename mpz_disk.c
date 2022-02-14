@@ -1,7 +1,8 @@
 #include "mpz_disk.h"
 #include <stdlib.h>
 #include <string.h>
-#include <cassert>
+#include <assert.h>
+#include <math.h>
 
 #ifdef _WIN32	/* Windows */
 #include <Windows.h>
@@ -28,11 +29,11 @@ int mpz_disk_init(mpz_disk_ptr disk_integer) {
 
 	mp_limb_t zero = 0;
 
-	/*disk_integer->*/ FILE* mp_file = fopen(disk_integer->filename, "wb");
-	if (!/*disk_integer->*/mp_file)
+	FILE* mp_file = fopen(disk_integer->filename, "wb");
+	if (!mp_file)
 		return -1;
 
-	fwrite(&zero, sizeof(mp_limb_t), 1, /*disk_integer->*/mp_file);
+	fwrite(&zero, sizeof(mp_limb_t), 1, mp_file);
 	
 	fclose(mp_file);
 
@@ -48,11 +49,16 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 {
 	FILE* rop_file = fopen(rop->filename, "wb");
 	FILE* op1_file = fopen(op1->filename, "rb");
-	FILE* op2_file = fopen(op1->filename, "rb");
+	FILE* op2_file = fopen(op2->filename, "rb");
 
 	if (!rop_file || !op1_file || !op2_file)
-		return -1;
+	{
+		fclose(rop_file);
+		fclose(op1_file);
+		fclose(op2_file);
 
+		return MPZ_DISK_ADD_ERROR_FILE_OPEN_FAIL;
+	}
 	// Addition roughly works in the following way:
 	// 1. Read blocks of size "block_size" bytes from op1
 	//    and op2
@@ -60,19 +66,35 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 	//    additions) and record the result and carry
 	// 3. Write the result to rop and record the carry
 
-	size_t available_mem = _mpz_disk_get_system_free_RAM();
+	size_t available_mem = MPZ_DISK_AVAILABLE_MEM_FUNCTION();
 
 	// We need memory for three blocks and then some
 	size_t block_size = available_mem / 3;
 	size_t limbs_in_block = block_size / sizeof(mp_limb_t);
+	block_size = limbs_in_block * sizeof(mp_limb_t);
 
-	// Number of blocks in op1
-	size_t n_op1_blocks = 1 + _mpz_disk_get_file_size(op1->filename) / block_size;
-	// Number of blocks in op2
-	size_t n_op2_blocks = 1 + _mpz_disk_get_file_size(op2->filename) / block_size;
+	// Total number of blocks in op1 and op2
+	// number of blocks = ceil( bytes in op1 / block size )
+
+	size_t op1_filesize = _mpz_disk_get_file_size(op1->filename),
+		   op2_filesize = _mpz_disk_get_file_size(op2->filename);
+	size_t n_op1_blocks = op1_filesize / block_size;
+	size_t n_op2_blocks = op2_filesize / block_size;
+	// Round up
+	if (op1_filesize > n_op1_blocks * block_size) n_op1_blocks++;
+	if (op2_filesize > n_op2_blocks * block_size) n_op2_blocks++;
+
 	// Minimum number of blocks in output (rop)
 	size_t n_blocks = max(n_op1_blocks, n_op2_blocks);
 
+	// If both the numbers fit inside a single block,
+	// reduce block size to save memory
+	if (n_blocks == 1) {
+		block_size = max(_mpz_disk_get_file_size(op1->filename),
+						 _mpz_disk_get_file_size(op2->filename));
+		limbs_in_block = block_size / sizeof(mp_limb_t);
+	}
+	
 	// Try to allocate memory for the blocks
 	mp_limb_t* rop_block, * op1_block, * op2_block;
 
@@ -82,8 +104,17 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 
 	// TODO Decrease blocks size progressively if any of the
 	// memory allocation fails
-	if (!rop_block || !op1_block || !op2_block)
-		return -2;
+	if (!rop_block || !op1_block || !op2_block) {
+		fclose(rop_file);
+		fclose(op1_file);
+		fclose(op2_file);
+
+		free(rop_block);
+		free(op1_block);
+		free(op2_block);
+
+		return MPZ_DISK_ADD_ERROR_MEM_ALLOC_FAIL;
+	}
 
 	mp_limb_t carry = 0;
 	for (int n = 1; n <= n_blocks; n++)
@@ -101,10 +132,10 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 		fread(op2_block, sizeof(mp_limb_t), limbs_in_block, op2_file);
 
 		// Add the blocks
-		mp_limb_t carry_now = MPZ_ADD_FUNCTION(rop_block, op1_block, op2_block, limbs_in_block);
+		mp_limb_t carry_now = MPZ_DISK_ADD_FUNCTION(rop_block, op1_block, op2_block, limbs_in_block);
 
 		// Process carry as well
-		carry_now += MPZ_ADD_CARRY_FUNCTION(rop_block, rop_block, limbs_in_block, carry);
+		carry_now += MPZ_DISK_ADD_CARRY_FUNCTION(rop_block, rop_block, limbs_in_block, carry);
 
 		// Write rop_block to rop
 		fwrite(rop_block, sizeof(mp_limb_t), limbs_in_block, rop_file);
@@ -114,17 +145,35 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 		carry = carry_now;
 	}
 
+	fclose(op1_file);
+	fclose(op2_file);
+	// Don't close rop_file just yet
+	free(op1_block);
+	free(op2_block);
+	// Don't free rop_block just yet
+	
 	// Finally, write out the carry
-	if (mpz_cmp_ui(carry, 0) == 0)
+	if (carry != 0) {
+		free(rop_block);
+
 		fwrite(&carry, sizeof(mp_limb_t), 1, rop_file);
+		fclose(rop_file);
+	}
 	else {
+		fclose(rop_file);
+
 		// Truncate unneccassary zereos in the output file
 		size_t top_limb = limbs_in_block - 1;
 		while (rop_block[top_limb] == 0 && top_limb > 0)
 			top_limb--;
 
-		_mpz_disk_truncate_file(rop->filename, (limbs_in_block - top_limb) * sizeof(mp_limb_t));
+		free(rop_block);
+
+		int ret = _mpz_disk_truncate_file(rop->filename, (limbs_in_block - top_limb - 1) * sizeof(mp_limb_t));
+		if (ret != 0)
+			return MPZ_DISK_ERROR_UNKNOWN;
 	}
+	return 0;
 }
 
 int mpz_disk_set_mpz(mpz_disk_ptr rop, mpz_srcptr op)
@@ -133,12 +182,50 @@ int mpz_disk_set_mpz(mpz_disk_ptr rop, mpz_srcptr op)
 	if (!mp_file)
 		return -1;
 
-	fwrite(op->_mp_d, sizeof(mp_limb_t), op->_mp_size, /*rop->*/mp_file);
+	fwrite(op->_mp_d, sizeof(mp_limb_t), op->_mp_size, mp_file);
 	fclose(mp_file);
 
 	return 0;
 }
-size_t _mpz_disk_get_system_free_RAM()
+
+int mpz_disk_get_mpz(mpz_ptr mpz, mpz_disk_ptr op)
+{
+	size_t size = _mpz_disk_get_file_size(op->filename);
+	
+	size_t limbs = size / sizeof(mp_limb_t);
+	if (size > limbs * sizeof(mp_limb_t))
+		limbs++;
+
+	// Round up
+	size = limbs * sizeof(mp_limb_t);
+
+	mpz_clear(mpz);
+	mpz_init2(mpz, limbs * sizeof(mp_limb_t) * 8);
+
+	char* buf = calloc(limbs, sizeof(mp_limb_t));
+
+	if (buf == NULL)
+		return -1;
+
+	FILE* fp = fopen(op->filename, "rb");
+
+	if (!fp) {
+		fclose(fp);
+		return -1;
+	}
+
+	fread(buf, 1, size, fp);
+	fclose(fp);
+
+	memcpy(mpz->_mp_d, buf, size);
+	mpz->_mp_size = limbs;
+
+	free(buf);
+
+	return 0;
+}
+
+size_t _mpz_disk_get_available_mem()
 {
 #ifdef _WIN32
 	MEMORYSTATUSEX status;
@@ -227,3 +314,4 @@ int _mpz_disk_truncate_file(char* filename, size_t bytes_to_truncate)
 #elif defined(__unix__)
 #endif
 }
+
