@@ -105,6 +105,54 @@ int test_mpz_disk_truncate_file()
 	return 0;
 }
 
+int test_mpz_disk_truncate_leading_zereos()
+{
+	printf("Testing _mpz_disk_truncate_leading_zereos()...");
+
+	const int TestCases = 10;
+	for (int test_n = 0; test_n < TestCases; ++test_n) {
+		FILE* fp = fopen(".__mpz_disk_test.tmp", "wb");
+
+		size_t non_zero_limbs = (rand() * 256) / RAND_MAX;
+		non_zero_limbs *= non_zero_limbs;
+		size_t n = non_zero_limbs;
+
+		while (n-- > 0)
+		{
+			// Not the best quality random number...
+			mp_limb_t m = rand() * rand();
+			m *= rand() * rand();
+
+			fwrite(&m, sizeof(mp_limb_t), 1, fp);
+		}
+
+		size_t z = (rand() * 1024) / RAND_MAX;
+		z *= z;
+		while (z-- > 0)
+		{
+			// Not the best quality random number...
+			mp_limb_t m = 0;
+			fwrite(&m, sizeof(mp_limb_t), 1, fp);
+		}
+
+		fclose(fp);
+
+		_mpz_disk_truncate_leading_zeroes(".__mpz_disk_test.tmp");
+
+		if (_mpz_disk_get_file_size(".__mpz_disk_test.tmp") != non_zero_limbs * sizeof(mp_limb_t))
+		{
+			printf(" FAILED\n");
+			printf("[ERR] expected: %d got: %d", non_zero_limbs, _mpz_disk_get_file_size(".__mpz_disk_test.tmp"));
+
+			return -1;
+		}
+
+		remove(".__mpz_disk_test.tmp");
+	}
+
+	printf(" OK\n");
+	return 0;
+}
 int test_mpz_disk_get_mpz() {
 	printf("Testing mpz_get_disk_mpz()...");
 
@@ -142,12 +190,84 @@ int test_mpz_disk_get_mpz() {
 }
 
 int test_mpz_disk_add() {
-	const int TestCases = 1000;
+	const int TestCases = 100;
 
 	gmp_randstate_t mp_randstate;
 	gmp_randinit_default(mp_randstate);
 
 	printf("Testing mpz_disk_add()...");
+
+	int i;
+	// Add two random numbers 
+	for (i = 0; i < TestCases; ++i)
+	{
+		mpz_t rand_op1, rand_op2, rand_rop, rop;
+		mpz_disk_t disk_op1, disk_op2, disk_rop;
+
+		mpz_init(rop);
+		mpz_init(rand_op1);
+		mpz_init(rand_op2);
+		mpz_init(rand_rop);
+		mpz_disk_init(disk_op1);
+		mpz_disk_init(disk_op2);
+		mpz_disk_init(disk_rop);
+
+		mpz_urandomb(rand_op1, mp_randstate, 1 + (rand() << 14) / RAND_MAX);
+		mpz_urandomb(rand_op2, mp_randstate, 1 + (rand() << 14) / RAND_MAX);
+
+		mpz_disk_set_mpz(disk_op1, rand_op1);
+		mpz_disk_set_mpz(disk_op2, rand_op2);
+
+		mpz_add     (rand_rop, rand_op1, rand_op2);
+		mpz_disk_add(disk_rop, disk_op1, disk_op2);
+
+		mpz_disk_get_mpz(rop, disk_rop);
+
+		if (mpz_cmp(rop, rand_rop) != 0) {
+			printf(" FAILED\n");
+			printf("[ERR] Incorrect result while adding numbers\n");
+
+			// --
+			printf("CASE #%d\n", i);
+			gmp_printf("op1: %Zx\n", rand_op1);
+			gmp_printf("op2: %Zx\n", rand_op2);
+			gmp_printf("rop: %Zx\n", rand_rop);
+			gmp_printf("got: %Zx\n", rop);
+			// --
+
+			mpz_clear(rop);
+			mpz_clear(rand_rop);
+			mpz_clear(rand_op1);
+			mpz_clear(rand_op2);
+			mpz_disk_clear(disk_rop);
+			mpz_disk_clear(disk_op1);
+			mpz_disk_clear(disk_op2);
+
+			return -1;
+		}
+
+		mpz_clear(rop);
+		mpz_clear(rand_rop);
+		mpz_clear(rand_op1);
+		mpz_clear(rand_op2);
+		mpz_disk_clear(disk_rop);
+		mpz_disk_clear(disk_op1);
+		mpz_disk_clear(disk_op2);
+	}
+	// Check the case if rop == op1 or rop == op2
+	// Check the case if op1 == op2
+
+	printf(" OK [%d cases tested]\n", TestCases);
+	return 0;
+}
+
+int test_mpz_disk_sub() {
+	const int TestCases = 1000;
+
+	gmp_randstate_t mp_randstate;
+	gmp_randinit_default(mp_randstate);
+
+	printf("Testing mpz_disk_sub()...");
 
 	int i;
 	// Add two random numbers of equal size
@@ -164,23 +284,26 @@ int test_mpz_disk_add() {
 		mpz_disk_init(disk_op2);
 		mpz_disk_init(disk_rop);
 
-		// Size of random number
-		int bitcnt = 1 + (10000 * rand()) / RAND_MAX;
-
-		mpz_urandomb(rand_op1, mp_randstate, bitcnt);
-		mpz_urandomb(rand_op2, mp_randstate, bitcnt);
+		mpz_urandomb(rand_op1, mp_randstate, 1 + (rand() << 14) / RAND_MAX);
+		mpz_urandomb(rand_op2, mp_randstate, 1 + (rand() << 14) / RAND_MAX);
 
 		mpz_disk_set_mpz(disk_op1, rand_op1);
 		mpz_disk_set_mpz(disk_op2, rand_op2);
 
-		mpz_add     (rand_rop, rand_op1, rand_op2);
-		mpz_disk_add(disk_rop, disk_op1, disk_op2);
+		if (mpz_cmp(rand_op1, rand_op2) > 0) {
+			mpz_sub(rand_rop, rand_op1, rand_op2);
+			mpz_disk_sub(disk_rop, disk_op1, disk_op2);
+		}
+		else {
+			mpz_sub(rand_rop, rand_op2, rand_op1);
+			mpz_disk_sub(disk_rop, disk_op2, disk_op1);
+		}
 
 		mpz_disk_get_mpz(rop, disk_rop);
 
 		if (mpz_cmp(rop, rand_rop) != 0) {
 			printf(" FAILED\n");
-			printf("[ERR] Incorrect result while adding numbers of equal size\n");
+			printf("[ERR] Incorrect result while subtracting numbers\n");
 
 			// --
 			printf("CASE #%d\n", i);
@@ -215,7 +338,7 @@ int test_mpz_disk_add() {
 	// Add 2^x - 1 and 1
 	// Add two gigantic numbers of size > 4Gb
 
-	printf(" OK [%d cases tested]", TestCases);
+	printf(" OK [%d cases tested]\n", TestCases);
 	return 0;
 }
 
@@ -224,8 +347,10 @@ int main()
 	int passed = 1;
 	passed = passed && !test_mpz_disk_get_file_size();
 	passed = passed && !test_mpz_disk_truncate_file();
+	passed = passed && !test_mpz_disk_truncate_leading_zereos();
 	passed = passed && !test_mpz_disk_get_mpz();
 	passed = passed && !test_mpz_disk_add();
+	passed = passed && !test_mpz_disk_sub();
 
 	if (!passed)
 		return -1;

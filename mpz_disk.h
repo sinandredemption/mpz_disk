@@ -8,7 +8,11 @@
 #define MPZ_DISK_FILENAME_LEN 20
 #define MPZ_DISK_ADD_FUNCTION mpn_add_n
 #define MPZ_DISK_ADD_CARRY_FUNCTION mpn_add_1
+#define MPZ_DISK_SUB_FUNCTION mpn_sub_n
+#define MPZ_DISK_SUB_CARRY_FUNCTION mpn_sub_1
 #define MPZ_DISK_AVAILABLE_MEM_FUNCTION _mpz_disk_get_available_mem
+
+#define _MPZ_DISK_DEFAULT_SEEK_COUNT 1024
 
 
 // Error codes
@@ -43,9 +47,10 @@ int mpz_disk_set_mpz(mpz_disk_ptr rop, mpz_srcptr op);
 int mpz_disk_set_str_file(mpz_disk_ptr rop, char* filename);
 
 int mpz_disk_get_mpz(mpz_ptr mpz, mpz_disk_ptr op);
+size_t mpz_disk_size(mpz_disk_ptr mpd);
 
 int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2);
-void mpz_disk_sub(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2);
+int mpz_disk_sub(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2);
 void mpz_disk_mul(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2);
 
 //void mpz_disk_add_mpz(mpz_disk_t, mpz_t, mpz_disk_t);
@@ -57,5 +62,7 @@ size_t _mpz_disk_get_available_mem(); // FIXME Rename
 int64_t _mpz_disk_get_file_size(char* filename);
 // Truncate the last 'bytes_to_truncate' bytes_to_truncate of a file
 int _mpz_disk_truncate_file(char* filename, size_t bytes_to_truncate);
+// Truncate leading limbs from a mpz_disk_t
+int _mpz_disk_truncate_leading_zeroes(char* filename);
 
 #endif

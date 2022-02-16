@@ -150,12 +150,10 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 	// Don't close rop_file just yet
 	free(op1_block);
 	free(op2_block);
-	// Don't free rop_block just yet
+	free(rop_block);
 	
 	// Finally, write out the carry
 	if (carry != 0) {
-		free(rop_block);
-
 		fwrite(&carry, sizeof(mp_limb_t), 1, rop_file);
 		fclose(rop_file);
 	}
@@ -163,13 +161,124 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 		fclose(rop_file);
 
 		// Truncate unneccassary zereos in the output file
-		size_t top_limb = limbs_in_block - 1;
-		while (rop_block[top_limb] == 0 && top_limb > 0)
-			top_limb--;
+		if (_mpz_disk_truncate_leading_zeroes(rop->filename) != 0)
+			return MPZ_DISK_ERROR_UNKNOWN;
+	}
+	return 0;
+}
+int mpz_disk_sub(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
+{
+	FILE* rop_file = fopen(rop->filename, "wb");
+	FILE* op1_file = fopen(op1->filename, "rb");
+	FILE* op2_file = fopen(op2->filename, "rb");
+
+	if (!rop_file || !op1_file || !op2_file)
+	{
+		fclose(rop_file);
+		fclose(op1_file);
+		fclose(op2_file);
+
+		return MPZ_DISK_ADD_ERROR_FILE_OPEN_FAIL;
+	}
+	// Addition roughly works in the following way:
+	// 1. Read blocks of size "block_size" bytes from op1
+	//    and op2
+	// 2. Add the two blocks (and the carry from previous
+	//    additions) and record the result and carry
+	// 3. Write the result to rop and record the carry
+
+	size_t available_mem = MPZ_DISK_AVAILABLE_MEM_FUNCTION();
+
+	// We need memory for three blocks and then some
+	size_t block_size = available_mem / 3;
+	size_t limbs_in_block = block_size / sizeof(mp_limb_t);
+	block_size = limbs_in_block * sizeof(mp_limb_t);
+
+	// Total number of blocks in op1 and op2
+	// number of blocks = ceil( bytes in op1 / block size )
+
+	size_t op1_filesize = _mpz_disk_get_file_size(op1->filename),
+		   op2_filesize = _mpz_disk_get_file_size(op2->filename);
+	size_t n_op1_blocks = op1_filesize / block_size;
+	size_t n_op2_blocks = op2_filesize / block_size;
+	// Round up
+	if (op1_filesize > n_op1_blocks * block_size) n_op1_blocks++;
+	if (op2_filesize > n_op2_blocks * block_size) n_op2_blocks++;
+
+	// Minimum number of blocks in output (rop)
+	size_t n_blocks = max(n_op1_blocks, n_op2_blocks);
+
+	// If both the numbers fit inside a single block,
+	// reduce block size to save memory
+	if (n_blocks == 1) {
+		block_size = max(_mpz_disk_get_file_size(op1->filename),
+						 _mpz_disk_get_file_size(op2->filename));
+		limbs_in_block = block_size / sizeof(mp_limb_t);
+	}
+	
+	// Try to allocate memory for the blocks
+	mp_limb_t* rop_block, * op1_block, * op2_block;
+
+	rop_block = malloc(limbs_in_block * sizeof(mp_limb_t));
+	op1_block = malloc(limbs_in_block * sizeof(mp_limb_t));
+	op2_block = malloc(limbs_in_block * sizeof(mp_limb_t));
+
+	// TODO Decrease blocks size progressively if any of the
+	// memory allocation fails
+	if (!rop_block || !op1_block || !op2_block) {
+		fclose(rop_file);
+		fclose(op1_file);
+		fclose(op2_file);
 
 		free(rop_block);
+		free(op1_block);
+		free(op2_block);
 
-		int ret = _mpz_disk_truncate_file(rop->filename, (limbs_in_block - top_limb - 1) * sizeof(mp_limb_t));
+		return MPZ_DISK_ADD_ERROR_MEM_ALLOC_FAIL;
+	}
+
+	mp_limb_t carry = 0;
+	for (int n = 1; n <= n_blocks; n++)
+	{
+		// Pad the input block with zero if the current block
+		// number is greater than or equal to the number of
+		// blocks in the input blocks
+		if (n >= n_op1_blocks)
+			memset(op1_block, 0, limbs_in_block * sizeof(mp_limb_t));
+		if (n >= n_op2_blocks)
+			memset(op2_block, 0, limbs_in_block * sizeof(mp_limb_t));
+
+		// Read from the files into the blocks
+		fread(op1_block, sizeof(mp_limb_t), limbs_in_block, op1_file);
+		fread(op2_block, sizeof(mp_limb_t), limbs_in_block, op2_file);
+
+		// Add the blocks
+		mp_limb_t carry_now = MPZ_DISK_SUB_FUNCTION(rop_block, op1_block, op2_block, limbs_in_block);
+
+		// Process carry as well
+		carry_now += MPZ_DISK_SUB_CARRY_FUNCTION(rop_block, rop_block, limbs_in_block, carry);
+
+		// Write rop_block to rop
+		fwrite(rop_block, sizeof(mp_limb_t), limbs_in_block, rop_file);
+
+		assert(carry_now <= 1);	// Carry can either by 0 or 1
+		
+		carry = carry_now;
+	}
+
+	fclose(op1_file);
+	fclose(op2_file);
+	fclose(rop_file);
+	free(op1_block);
+	free(op2_block);
+	free(rop_block);
+	
+	// Finally, write out the carry
+	if (carry != 0) {
+		assert(0);
+	}
+	else {
+		int ret = _mpz_disk_truncate_leading_zeroes(rop->filename);
 		if (ret != 0)
 			return MPZ_DISK_ERROR_UNKNOWN;
 	}
@@ -223,6 +332,15 @@ int mpz_disk_get_mpz(mpz_ptr mpz, mpz_disk_ptr op)
 	free(buf);
 
 	return 0;
+}
+
+size_t mpz_disk_size(mpz_disk_ptr mpd)
+{
+	size_t nlimbs = _mpz_disk_get_file_size(mpd->filename) / sizeof(mp_limb_t);
+	if (nlimbs * sizeof(mp_limb_t) < _mpz_disk_get_file_size(mpd->filename))
+		nlimbs += 1;
+
+	return nlimbs;
 }
 
 size_t _mpz_disk_get_available_mem()
@@ -313,5 +431,70 @@ int _mpz_disk_truncate_file(char* filename, size_t bytes_to_truncate)
 	}
 #elif defined(__unix__)
 #endif
+}
+
+int _mpz_disk_truncate_leading_zeroes(char* filename)
+{
+	size_t bytes_to_truncate = 0;
+
+	FILE* fp = fopen(filename, "rb");
+
+	// If it's a small file, just map the file to memory and proceed
+	if (_mpz_disk_get_file_size(filename) < _MPZ_DISK_DEFAULT_SEEK_COUNT * sizeof(mp_limb_t)) {
+		mpz_disk_t mp;
+		strcpy(mp->filename, filename);
+
+		size_t limbs = mpz_disk_size(mp);	// FIXME This is a quick hack
+		mp_limb_t* buf = malloc(limbs * sizeof(mp_limb_t));
+
+		if (buf == NULL) {
+			fclose(fp);
+			return -1;
+		}
+
+		fread(buf, sizeof(mp_limb_t), limbs, fp);
+		fclose(fp);
+
+		int top_limb_idx;
+		for (top_limb_idx = limbs - 1; top_limb_idx >= 0; top_limb_idx--)
+			if (buf[top_limb_idx] != 0)
+				break;
+
+		free(buf);
+
+		int ret = _mpz_disk_truncate_file(filename, (limbs - top_limb_idx - 1) * sizeof(mp_limb_t));
+
+		if (ret != 0)
+			return -1;
+		return 0;
+	}
+
+
+	mp_limb_t buf[_MPZ_DISK_DEFAULT_SEEK_COUNT];
+
+	fseek(fp, 0, SEEK_END);
+
+	int top_limb_idx;
+	do
+	{
+		fseek(fp, -_MPZ_DISK_DEFAULT_SEEK_COUNT * sizeof(mp_limb_t), SEEK_CUR);	// Seek back
+		fread(buf, sizeof(mp_limb_t), _MPZ_DISK_DEFAULT_SEEK_COUNT, fp);
+		fseek(fp, -_MPZ_DISK_DEFAULT_SEEK_COUNT * sizeof(mp_limb_t), SEEK_CUR);	// Seek back
+
+		for (top_limb_idx = _MPZ_DISK_DEFAULT_SEEK_COUNT - 1; top_limb_idx >= 0; top_limb_idx--)
+			if (buf[top_limb_idx] != 0)
+				break;
+
+		bytes_to_truncate += (_MPZ_DISK_DEFAULT_SEEK_COUNT - top_limb_idx - 1) * sizeof(mp_limb_t);
+	} while (top_limb_idx == -1);
+
+	fclose(fp);
+
+	int ret = _mpz_disk_truncate_file(filename, bytes_to_truncate);
+
+	if (ret != 0)
+		return -1;
+
+	return 0;
 }
 
