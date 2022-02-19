@@ -5,7 +5,7 @@
 #include <mpir.h>
 #include <stdint.h>
 
-#define MPZ_DISK_FILENAME_LEN 20
+#define MPZ_DISK_FILENAME_LEN 25
 #define MPZ_DISK_ADD_FUNCTION mpn_add_n
 #define MPZ_DISK_ADD_CARRY_FUNCTION mpn_add_1
 #define MPZ_DISK_SUB_FUNCTION mpn_sub_n
@@ -20,6 +20,9 @@
 #define MPZ_DISK_ADD_ERROR_MEM_ALLOC_FAIL -2
 #define MPZ_DISK_ERROR_UNKNOWN -314159
 
+#define MPZ_DISK_SIGN_POSITIVE 0
+#define MPZ_DISK_SIGN_NEGATIVE 1
+
 #ifdef MPZ_DISK_TESTING
 #undef MPZ_DISK_AVAILABLE_MEM_FUNCTION
 // Returns a predefined number as available memory (useful for testing purposes)
@@ -29,7 +32,7 @@ size_t _mpz_disk_simulate_available_mem();
 
 typedef struct
 {
-	char filename[MPZ_DISK_FILENAME_LEN + 4 + 1]; // 4 for ".tmp", 1 for null termination
+	char filename[MPZ_DISK_FILENAME_LEN];
 	// FILE* mp_file;
 	// TODO Do we need a FILE ptr here?
 } _mpz_disk_struct;
@@ -60,9 +63,11 @@ void mpz_disk_mul(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2);
 size_t _mpz_disk_get_available_mem(); // FIXME Rename
 // Get size of file in bytes
 int64_t _mpz_disk_get_file_size(char* filename);
+void _mpz_disk_get_sign_filename(char* dest, mpz_disk_ptr rop);
 // Truncate the last 'bytes_to_truncate' bytes_to_truncate of a file
 int _mpz_disk_truncate_file(char* filename, size_t bytes_to_truncate);
 // Truncate leading limbs from a mpz_disk_t
 int _mpz_disk_truncate_leading_zeroes(char* filename);
+
 
 #endif

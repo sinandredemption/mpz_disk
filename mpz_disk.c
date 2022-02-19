@@ -19,7 +19,7 @@ int mpz_disk_init(mpz_disk_ptr disk_integer) {
     const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 	int n = 0;
-    for (n = 0; n < MPZ_DISK_FILENAME_LEN; n++) {
+    for (n = 0; n < MPZ_DISK_FILENAME_LEN - 5; n++) {
 		int key = rand() % (int)(sizeof charset - 1);
 		disk_integer->filename[n] = charset[key];
 	}
@@ -119,23 +119,29 @@ int mpz_disk_add(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 	mp_limb_t carry = 0;
 	for (int n = 1; n <= n_blocks; n++)
 	{
+		mp_limb_t carry_now = 0;
+
 		// Pad the input block with zero if the current block
-		// number is greater than or equal to the number of
-		// blocks in the input blocks
-		if (n >= n_op1_blocks)
+		// number is the last block
+		if (n == n_op1_blocks)
 			memset(op1_block, 0, limbs_in_block * sizeof(mp_limb_t));
-		if (n >= n_op2_blocks)
+		if (n == n_op2_blocks)
 			memset(op2_block, 0, limbs_in_block * sizeof(mp_limb_t));
 
-		// Read from the files into the blocks
 		fread(op1_block, sizeof(mp_limb_t), limbs_in_block, op1_file);
 		fread(op2_block, sizeof(mp_limb_t), limbs_in_block, op2_file);
 
-		// Add the blocks
-		mp_limb_t carry_now = MPZ_DISK_ADD_FUNCTION(rop_block, op1_block, op2_block, limbs_in_block);
+		// Directly copy the block if the other block is zero
+		if (n > n_op1_blocks)
+			memcpy(rop_block, op2_block, limbs_in_block * sizeof(mp_limb_t));
+		else if (n > n_op2_blocks)
+			memcpy(rop_block, op1_block, limbs_in_block * sizeof(mp_limb_t));
+		else // Add the blocks
+			carry_now = MPZ_DISK_ADD_FUNCTION(rop_block, op1_block, op2_block, limbs_in_block);
 
 		// Process carry as well
-		carry_now += MPZ_DISK_ADD_CARRY_FUNCTION(rop_block, rop_block, limbs_in_block, carry);
+		if (carry)
+			carry_now += MPZ_DISK_ADD_CARRY_FUNCTION(rop_block, rop_block, limbs_in_block, carry);
 
 		// Write rop_block to rop
 		fwrite(rop_block, sizeof(mp_limb_t), limbs_in_block, rop_file);
@@ -240,29 +246,35 @@ int mpz_disk_sub(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 	mp_limb_t carry = 0;
 	for (int n = 1; n <= n_blocks; n++)
 	{
+		mp_limb_t carry_now = 0;
+
 		// Pad the input block with zero if the current block
-		// number is greater than or equal to the number of
-		// blocks in the input blocks
-		if (n >= n_op1_blocks)
+		// number is the last block
+		if (n == n_op1_blocks)
 			memset(op1_block, 0, limbs_in_block * sizeof(mp_limb_t));
-		if (n >= n_op2_blocks)
+		if (n == n_op2_blocks)
 			memset(op2_block, 0, limbs_in_block * sizeof(mp_limb_t));
 
-		// Read from the files into the blocks
 		fread(op1_block, sizeof(mp_limb_t), limbs_in_block, op1_file);
 		fread(op2_block, sizeof(mp_limb_t), limbs_in_block, op2_file);
 
-		// Add the blocks
-		mp_limb_t carry_now = MPZ_DISK_SUB_FUNCTION(rop_block, op1_block, op2_block, limbs_in_block);
+		// Directly copy the block if the other block is zero
+		if (n > n_op1_blocks)
+			memcpy(rop_block, op2_block, limbs_in_block * sizeof(mp_limb_t));
+		else if (n > n_op2_blocks)
+			memcpy(rop_block, op1_block, limbs_in_block * sizeof(mp_limb_t));
+		else // Add the blocks
+			carry_now = MPZ_DISK_SUB_FUNCTION(rop_block, op1_block, op2_block, limbs_in_block);
 
 		// Process carry as well
-		carry_now += MPZ_DISK_SUB_CARRY_FUNCTION(rop_block, rop_block, limbs_in_block, carry);
+		if (carry)
+			carry_now += MPZ_DISK_SUB_CARRY_FUNCTION(rop_block, rop_block, limbs_in_block, carry);
 
 		// Write rop_block to rop
 		fwrite(rop_block, sizeof(mp_limb_t), limbs_in_block, rop_file);
 
 		assert(carry_now <= 1);	// Carry can either by 0 or 1
-		
+
 		carry = carry_now;
 	}
 
@@ -291,7 +303,16 @@ int mpz_disk_set_mpz(mpz_disk_ptr rop, mpz_srcptr op)
 	if (!mp_file)
 		return -1;
 
-	fwrite(op->_mp_d, sizeof(mp_limb_t), op->_mp_size, mp_file);
+	//char mp_sign_filename[MPZ_DISK_FILENAME_LEN + 5];
+	//_mpz_disk_get_sign_filename(mp_sign_filename, rop);
+
+	//FILE* mp_sign_file = fopen(mp_sign_filename, "wb+");
+
+	//char mp_sign = op->_mp_size < 0 ? MPZ_DISK_SIGN_NEGATIVE : MPZ_DISK_SIGN_POSITIVE;
+	//fwrite(&mp_sign, 1, 1, mp_sign_file);
+	//fclose(mp_sign_file);
+
+	fwrite(op->_mp_d, sizeof(mp_limb_t), abs(op->_mp_size), mp_file);
 	fclose(mp_file);
 
 	return 0;
@@ -341,6 +362,12 @@ size_t mpz_disk_size(mpz_disk_ptr mpd)
 		nlimbs += 1;
 
 	return nlimbs;
+}
+
+void _mpz_disk_get_sign_filename(char* dest, mpz_disk_ptr rop)
+{
+	memcpy(dest, rop->filename, MPZ_DISK_FILENAME_LEN);
+	strcpy(&dest[MPZ_DISK_FILENAME_LEN], ".sgn");
 }
 
 size_t _mpz_disk_get_available_mem()
@@ -497,4 +524,5 @@ int _mpz_disk_truncate_leading_zeroes(char* filename)
 
 	return 0;
 }
+
 

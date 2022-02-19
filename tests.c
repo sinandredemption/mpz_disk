@@ -262,7 +262,7 @@ int test_mpz_disk_add() {
 }
 
 int test_mpz_disk_sub() {
-	const int TestCases = 1000;
+	const int TestCases = 100;
 
 	gmp_randstate_t mp_randstate;
 	gmp_randinit_default(mp_randstate);
