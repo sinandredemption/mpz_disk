@@ -297,6 +297,58 @@ int mpz_disk_sub(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2)
 	return 0;
 }
 
+int mpz_disk_cmpabs(mpz_disk_ptr op1, mpz_disk_ptr op2)
+{
+	// If sizes are unequal, directly compare the sizes
+	if (mpz_disk_size(op1) != mpz_disk_size(op2))
+		return mpz_disk_size(op1) > mpz_disk_size(op2) ? 1 : -1;
+
+	FILE* op1_file = fopen(op1->filename, "rb");
+	FILE* op2_file = fopen(op2->filename, "rb");
+
+	// Number of limbs in both op1 and op2 are equal
+	size_t nlimbs = mpz_disk_size(op1);
+
+	mp_limb_t op1_buf[_MPZ_DISK_DEFAULT_SEEK_COUNT] = { 0 };
+	mp_limb_t op2_buf[_MPZ_DISK_DEFAULT_SEEK_COUNT] = { 0 };
+
+	fseek(op1_file, 0, SEEK_END);
+	fseek(op2_file, 0, SEEK_END);
+	
+	for (size_t limbs_compared = 0; limbs_compared < nlimbs; limbs_compared += _MPZ_DISK_DEFAULT_SEEK_COUNT)
+	{
+		// Seek back and read
+		if (nlimbs - limbs_compared > _MPZ_DISK_DEFAULT_SEEK_COUNT) {
+			fseek(op1_file, -_MPZ_DISK_DEFAULT_SEEK_COUNT * sizeof(mp_limb_t), SEEK_CUR);
+			fseek(op2_file, -_MPZ_DISK_DEFAULT_SEEK_COUNT * sizeof(mp_limb_t), SEEK_CUR);
+		}
+		else {
+			fseek(op1_file, 0, SEEK_SET);
+			fseek(op2_file, 0, SEEK_SET);
+		}
+
+		// Read
+		fread(op1_buf, sizeof(mp_limb_t), _MPZ_DISK_DEFAULT_SEEK_COUNT, op1_file);
+		fread(op2_buf, sizeof(mp_limb_t), _MPZ_DISK_DEFAULT_SEEK_COUNT, op2_file);
+
+		// Compare
+		int cmp = mpn_cmp(op1_buf, op2_buf, _MPZ_DISK_DEFAULT_SEEK_COUNT);
+
+		if (cmp != 0) {
+			fclose(op1_file);
+			fclose(op2_file);
+
+			return cmp;
+		}
+	}
+
+	fclose(op1_file);
+	fclose(op2_file);
+
+	// Equal
+	return 0;
+}
+
 int mpz_disk_set_mpz(mpz_disk_ptr rop, mpz_srcptr op)
 {
 	FILE* mp_file = fopen(rop->filename, "wb+");

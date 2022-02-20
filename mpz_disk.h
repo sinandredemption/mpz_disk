@@ -60,6 +60,8 @@ void mpz_disk_mul(mpz_disk_ptr rop, mpz_disk_ptr op1, mpz_disk_t op2);
 //void mpz_disk_sub_mpz(mpz_disk_t, mpz_t, mpz_disk_t);
 //void mpz_disk_mul_mpz(mpz_disk_t, mpz_t, mpz_disk_t);
 
+int mpz_disk_cmpabs(mpz_disk_ptr op1, mpz_disk_ptr op2);
+
 size_t _mpz_disk_get_available_mem(); // FIXME Rename
 // Get size of file in bytes
 int64_t _mpz_disk_get_file_size(char* filename);

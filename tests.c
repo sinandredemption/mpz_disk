@@ -342,15 +342,84 @@ int test_mpz_disk_sub() {
 	return 0;
 }
 
+int test_mpz_disk_cmpabs()
+{
+	const int TestCases = 100;
+
+	gmp_randstate_t mp_randstate;
+	gmp_randinit_default(mp_randstate);
+
+	printf("Testing mpz_disk_cmpabs()...");
+
+	int i;
+	// Add two random numbers of equal size
+	for (i = 0; i < TestCases; ++i)
+	{
+		mpz_t rand_op1, rand_op2;
+		mpz_disk_t disk_op1, disk_op2;
+
+		mpz_init(rand_op1); mpz_init(rand_op2);
+		mpz_disk_init(disk_op1); mpz_disk_init(disk_op2);
+
+		mpz_urandomb(rand_op1, mp_randstate, 1 + (rand() << 14) / RAND_MAX);
+		mpz_disk_set_mpz(disk_op1, rand_op1);
+
+		int test_type = rand() % 3;
+		int cmp_exp, cmp_got;
+
+		switch (test_type)
+		{
+		case 0:
+			// Compare op1 with random op2
+			mpz_urandomb(rand_op2, mp_randstate, 1 + (rand() << 14) / RAND_MAX);
+			break;
+		case 1:
+			// Compare op1 with op2 of same size
+			mpz_urandomb(rand_op2, mp_randstate, mpz_sizeinbase(rand_op1, 2));
+			break;
+		case 2:
+			// Set a bit in op1 and compare
+			mpz_set(rand_op2, rand_op1);
+			mpz_setbit(rand_op2, (rand() * mpz_sizeinbase(rand_op1, 2) / RAND_MAX));
+			break;
+		default:
+			break;
+		}
+
+		mpz_disk_set_mpz(disk_op2, rand_op2);
+
+		cmp_exp = mpz_cmpabs(rand_op1, rand_op2);
+		cmp_got = mpz_disk_cmpabs(disk_op1, disk_op2);
+
+#define SGN(x) ((x) > 0 ? 1 : (x) < 0 ? -1 : 0)
+		if (SGN(cmp_exp) != SGN(cmp_got)) {
+			printf(" FAILED\n");
+
+			mpz_clear(rand_op1); mpz_clear(rand_op2);
+			mpz_disk_clear(disk_op1); mpz_disk_clear(disk_op2);
+
+			return -1;
+		}
+#undef SGN
+
+		mpz_clear(rand_op1); mpz_clear(rand_op2);
+		mpz_disk_clear(disk_op1); mpz_disk_clear(disk_op2);
+	}
+
+	printf(" OK [%d cases tested]\n", TestCases);
+	return 0;
+}
+
 int main()
 {
 	int passed = 1;
-	passed = passed && !test_mpz_disk_get_file_size();
-	passed = passed && !test_mpz_disk_truncate_file();
-	passed = passed && !test_mpz_disk_truncate_leading_zereos();
-	passed = passed && !test_mpz_disk_get_mpz();
-	passed = passed && !test_mpz_disk_add();
-	passed = passed && !test_mpz_disk_sub();
+	//passed = passed && !test_mpz_disk_get_file_size();
+	//passed = passed && !test_mpz_disk_truncate_file();
+	//passed = passed && !test_mpz_disk_truncate_leading_zereos();
+	//passed = passed && !test_mpz_disk_get_mpz();
+	//passed = passed && !test_mpz_disk_add();
+	//passed = passed && !test_mpz_disk_sub();
+	passed = passed && !test_mpz_disk_cmpabs();
 
 	if (!passed)
 		return -1;
